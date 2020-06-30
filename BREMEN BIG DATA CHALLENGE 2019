@@ -1,0 +1,206 @@
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import os
+from scipy import stats
+import glob
+import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import LabelEncoder,OneHotEncoder
+from matplotlib.pyplot import figure
+%matplotlib inline
+
+# Read the training file
+df_train_csv = pd.read_csv('files/train.csv')
+
+df_train_csv.head()
+
+# Extract the individual subjects from training set
+df_train_csv_subjects = list(dict(df_train_csv['Subject'].value_counts()).keys())
+
+df_train_csv_subjects 
+
+list_of_dfs = [] # To store the dataframes
+
+def parse_subject_files(subject,all_files):
+    '''
+    Input: Subject in the train file and all the instances(files) of that subject
+    
+    1. Loop through all the files(instances) of the subject present the subject folder
+    2. Validating the subject in the train file.
+    3. Add the list of dataframes into list_of_dfs
+    
+    '''
+    print(subject,' : started processing.....')
+    
+    for filename in all_files:
+        df = pd.read_csv(filename, header=None)
+        if filename.split(sep='\\')[1] in list(df_train_csv['Datafile'].str
+                                                                      .partition('/')[2]):
+            current_label = (df_train_csv[df_train_csv['Datafile']==
+                                          (''.join([subject,'/',filename.split(sep='\\')[1]]))]
+                                          ['Label'].values[0])
+            df['Label'] = current_label
+            list_of_dfs.append(df)
+            
+    print(subject,' : completed processing')
+
+# Loop through each subject in the train file and call the parse_subject_files definition
+for i in range(len(df_train_csv_subjects)):
+    path = '/Users/natha/Downloads/bbdc2019/files/'+df_train_csv_subjects[i]
+    all_files = glob.glob(path + "/*.csv")
+    parse_subject_files(df_train_csv_subjects[i],all_files)
+
+# Concat all the files in a single frame
+df_train_main = pd.concat(list_of_dfs, axis=0)
+
+df_train_main
+
+# Rename the columns
+# A 'ground truth' column named as Label has been added as our y-variable
+df_train_main.columns = ['EMG1',
+                'EMG2',
+                'EMG3',
+                'EMG4',
+                'Airborne',
+                'ACC upper X',
+                'ACC upper Y',
+                'ACC upper Z',
+                'Goniometer X',
+                'ACC lower X',
+                'ACC lower Y',
+                'ACC loewr Z',
+                'Goniometer Y',
+                'Gyro upper X',
+                'Gyro upper Y',
+                'Gyro upper Z',
+                'Gyro lower X',
+                'Gyro lower Y',
+                'Gyro lower Z',
+                'Label']
+
+df_train_main
+
+label_encoder = LabelEncoder()
+df_train_main['Label'] = label_encoder.fit_transform(df_train_main['Label'])
+
+z_scores = stats.zscore(df_train_main)
+abs_z_scores = np.abs(z_scores)
+filtered_entries = (abs_z_scores < 1).all(axis=1)
+df_train_main = df_train_main[filtered_entries]
+
+x = df_train_main.iloc[:,:-1].values
+y = df_train_main.iloc[:,19].values
+
+y = y.reshape(-1,1)
+
+onehotencoder = OneHotEncoder(categories='auto')
+y = onehotencoder.fit_transform(y).toarray()
+
+# Splitting the data into train-test set
+from sklearn.model_selection import train_test_split
+x_train,x_test,y_train,y_test = train_test_split(x,y,test_size=0.20)
+
+# Feature Scaling 
+from sklearn.preprocessing import StandardScaler
+sc = StandardScaler()
+x_train = sc.fit_transform(x_train)
+x_test = sc.transform(x_test)
+
+# Principal Component Analysis
+from sklearn.decomposition import PCA
+pca = PCA(n_components = 8) #found this to be the optimal number of columns 
+x_train = pca.fit_transform(x_train)
+x_test = pca.transform(x_test)
+
+# For the original dataframe
+figure(num=None, figsize=(20, 18), dpi=80, facecolor='w', edgecolor='k')
+sns.heatmap(df_train_main.corr(), annot=True, fmt=".2%")
+
+# after PCA we found 8 columns which can be selected 
+figure(num=None, figsize=(8, 5), dpi=80, facecolor='w', edgecolor='k')
+sns.heatmap(pd.DataFrame(x_train).corr(), annot=True)
+
+from sklearn.ensemble import RandomForestRegressor
+rf = RandomForestRegressor(n_estimators = 30, random_state = 42)
+
+rf.fit(x_train,y_train)
+
+gf =rf.score(x_test,y_test)
+gf
+
+from sklearn.ensemble import RandomForestRegressor
+rf = RandomForestRegressor(n_estimators = 40, random_state = 42)
+
+rf.fit(x_train,y_train)
+
+
+gf =rf.score(x_test,y_test)
+gf
+
+
+from sklearn.ensemble import RandomForestRegressor
+rf = RandomForestRegressor(n_estimators = 70, random_state = 42)
+
+rf.fit(x_train,y_train)
+
+gf =rf.score(x_test,y_test)
+gf
+
+from sklearn.neighbors import KNeighborsClassifier
+classifier = KNeighborsClassifier(n_neighbors=5)
+classifier.fit(x_train, y_train)
+
+y_pred = classifier.predict(x_test)
+
+y_pred
+
+gf =rf.score(x_test,y_test)
+
+gf
+
+from sklearn.neighbors import KNeighborsClassifier
+classifier = KNeighborsClassifier(n_neighbors=80)
+classifier.fit(x_train, y_train)
+
+kf =rf.score(x_test,y_test)
+
+kf
+
+from sklearn.neighbors import KNeighborsClassifier
+
+error = []
+
+# Calculating error for K values between 1 and 40
+for i in range(1, 10):
+    knn = KNeighborsClassifier(n_neighbors=i)
+    knn.fit(x_train, y_train)
+    pred_i = knn.predict(x_test)
+    error.append(np.mean(pred_i != y_test))
+    
+
+plt.figure(figsize=(12, 6))
+plt.plot(range(1, 10), error, color='blue', linestyle='dashed', marker='o',
+         markerfacecolor='pink', markersize=10)
+plt.title('Error Rate K Value')
+plt.xlabel('K Value')
+plt.ylabel('Mean Error')
+
+
+
+error = []
+
+# Calculating error for K values between 1 and 40
+for i in range(1, 10):
+    knn = KNeighborsClassifier(n_neighbors=i)
+    knn.fit(x_train, y_train)
+    pred_i = knn.predict(x_test)
+    error.append(np.mean(pred_i != y_test))
+
+plt.figure(figsize=(12, 6))
+plt.plot(range(1, 40), error, color='pink', linestyle='dashed', marker='o',
+         markerfacecolor='black', markersize=10)
+plt.title('Error Rate K Value')
+plt.xlabel('K Value')
+plt.ylabel('Mean Error')
+
